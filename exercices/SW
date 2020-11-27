@@ -1,0 +1,14 @@
+url_next <- "https://swapi.dev/api/planets/?format=json"
+pages <- list()
+while(!is.null(url_next)) {
+  df <- fromJSON(url_next)
+  pages[[length(pages) + 1]] <- df[["results"]]
+  url_next <- df[["next"]]
+}
+df_planet <- rbind_pages(pages)
+df_planet %>%
+summarise(n = n())
+planet_path <- file.path("data", "planet.json")
+con <- file(planet_path, open = "wb")
+stream_out(df_planet, con)
+close(con)
