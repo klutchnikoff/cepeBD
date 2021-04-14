@@ -1,3 +1,3 @@
-# Certificat Data Scientist (BD19)
+# Certificat Data Scientist
 
 Les documents relatifs à la formation.
