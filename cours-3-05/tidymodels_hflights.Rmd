@@ -1,0 +1,109 @@
+---
+title: "Tidymodels & hflights"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(hflights)
+```
+
+
+## Nettoyage des données
+
+```{r}
+HF <- as_tibble(hflights) %>% 
+  select(ArrDelay, DepDelay, Dest, UniqueCarrier) %>%
+  drop_na(ArrDelay) %>% 
+  mutate(Dest = as_factor(Dest),
+         UniqueCarrier = as_factor(UniqueCarrier)) %>% 
+  mutate(ArrDelay = log(ArrDelay - min(ArrDelay) + 1))
+glimpse(HF)
+```
+
+## Exploration des données
+
+```{r}
+as_tibble(hflights) %>% ggplot() +
+  aes(x = DepDelay, y = ArrDelay) +
+  geom_point()
+```
+
+
+
+## Les recettes; etc.
+
+```{r}
+hf_split <- initial_split(HF, prop = 0.8)
+hf_train <- training(hf_split)
+hf_test <- testing(hf_split)
+```
+
+```{r}
+hf_recipe <- 
+  recipe(ArrDelay ~ DepDelay + Dest,
+         data = hf_train) %>% 
+  step_mutate(DepDelay = log(DepDelay - min(DepDelay) + 1)) %>% 
+  step_dummy(all_nominal())
+```
+
+Ce qui suit est inutile dans un worflow
+
+```{r}
+hf_prepped <- prep(hf_recipe)
+hf_train_prepped <- bake(hf_prepped, new_data = NULL)
+hf_test_prepped <- bake(hf_prepped, new_data = hf_test)
+```
+
+On fait un `fit()` des données
+
+```{r}
+model_lm <- linear_reg() %>% 
+  set_engine("lm") %>% 
+  set_mode("regression") # inutile car paramère par défaut
+```
+
+```{r}
+model_lm %>% 
+  fit_xy(
+    x = hf_train_prepped %>% select(-ArrDelay),
+    y = hf_train_prepped %>% pull(ArrDelay)
+  )
+```
+```{r}
+wflow <- 
+  workflow() %>% 
+    add_model(model_lm) %>% 
+    add_recipe(hf_recipe)
+```
+
+```{r}
+my_fit <- fit(wflow, hf_train)
+```
+```{r}
+predict(my_fit, hf_test)
+```
+
+## Code final
+
+```{r}
+hf_recipe <- 
+  recipe(ArrDelay ~ DepDelay + Dest,
+         data = hf_train) %>% 
+  step_mutate(DepDelay = log(DepDelay - min(DepDelay) + 1)) %>% 
+  step_dummy(all_nominal())
+
+model_lm <- linear_reg() %>% 
+  set_engine("lm") %>% 
+  set_mode("regression")
+
+wflow <- 
+  workflow() %>% 
+    add_model(model_lm) %>% 
+    add_recipe(hf_recipe)
+
+my_fit <- fit(wflow, hf_train)
+predict(my_fit, hf_test)
+```
+

@@ -1,0 +1,274 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(jsonlite)
+library(mongolite)
+library(tidymodels)
+```
+
+
+```{r}
+data(ames)
+Ames <- ames
+```
+
+
+```{r}
+ames_split <- initial_split(ames, prob = 0.80)
+ames_split
+```
+```{r}
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+```
+
+
+```{r}
+ames_test %>% dim()
+```
+
+
+Recette
+
+```{r}
+simple_ames <- recipe(
+  Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type,
+  data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_dummy(all_nominal())
+simple_ames
+```
+
+```{r}
+simple_ames <- prep(simple_ames, training = ames_train)
+```
+
+
+```{r}
+bake(simple_ames, new_data = ames_test)
+```
+
+```{r}
+simple_ames %>%
+  bake(new_data = NULL, starts_with("Nei"))
+```
+
+```{r}
+simple_ames %>%
+  bake(new_data = NULL, all_numeric())
+```
+
+
+
+```{r}
+simple_ames <-
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type,
+    data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal()) %>%
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+  step_interact(~ starts_with("Neigh"):starts_with("Bldg"))
+```
+
+```{r}
+simple_ames %>% 
+  prep(training = ames_train) %>% 
+  bake(new_data = NULL) %>% 
+  select(contains("_x_"))
+```
+
+
+```{r}
+recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type,
+data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  themis::step_upsample(Neighborhood) %>%
+  prep() %>%
+  bake(new_data = NULL) %>%
+  ggplot(aes(y = Neighborhood)) +
+    geom_bar() +
+  labs(y = NULL)
+```
+
+
+
+
+
+```{r}
+library(patchwork)
+library(splines)
+plot_smoother <- function(deg_free) {
+  ggplot(Ames, aes(x = Latitude, y = Sale_Price)) +
+  geom_point(alpha = .2) +
+  scale_y_log10() +
+  geom_smooth(
+    method = lm,
+    formula = y ~ ns(x, df = deg_free),
+    col = "red",
+    se = FALSE
+  ) +
+  ggtitle(paste(deg_free, "Spline Terms"))
+}
+```
+
+
+
+```{r}
+ames <- mutate(Ames, Sale_Price = log10(Sale_Price))
+set.seed(123)
+ames_split <- initial_split(ames, prob = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+ames_rec <-
+recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+Latitude + Longitude, data = ames_train) %>%
+step_log(Gr_Liv_Area, base = 10) %>%
+step_other(Neighborhood, threshold = 0.01) %>%
+step_dummy(all_nominal()) %>%
+step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>%
+step_ns(Latitude, Longitude, deg_free = 20)
+```
+
+```{r}
+ames_rec_prepped <- prep(ames_rec)
+ames_train_prepped <- bake(ames_rec_prepped, new_data = NULL)
+ames_test_prepped <- bake(ames_rec_prepped, ames_test)
+# Fit the model; Note that the column Sale_Price has already been
+# log transformed.
+lm_fit <- lm(Sale_Price ~ ., data = ames_train_prepped)
+```
+
+```{r}
+lm_fit
+```
+
+
+
+```{r}
+glance(lm_fit)
+```
+
+
+
+```{r}
+library(glmnet)
+glm_fit <- glmnet(x = ames_train_prepped %>% 
+         select(- Sale_Price) %>% 
+         as.matrix(),
+      y = ames_train_prepped %>% 
+        select(Sale_Price) %>% 
+        as.matrix(),
+      alpha = 0,
+      lambda = 2)
+```
+
+```{r}
+tidy(glm_fit)
+```
+
+
+
+
+## Parsnip
+
+```{r}
+lm_model <-
+  linear_reg() %>%
+  set_engine("lm")
+lm_model
+```
+
+```{r}
+lm_model <-
+  linear_reg() %>%
+  set_engine("glmnet")
+lm_form_fit <-
+  lm_model %>%
+  fit(
+    Sale_Price ~ Longitude + Latitude,
+    data = ames_train
+  )
+```
+
+```{r}
+lm_form_fit
+```
+
+
+
+## Worflows
+
+
+
+```{r}
+lm_model <-
+  linear_reg() %>%
+  set_engine("lm") %>% 
+  set_mode("regression")
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>% 
+  add_formula(Sale_Price ~ Longitude + Latitude)
+```
+
+
+```{r}
+lm_wflow
+```
+```{r}
+my_fit <- fit(lm_wflow, ames_train)
+class(my_fit)
+my_fit
+```
+```{r}
+glance(my_fit)
+```
+
+
+```{r}
+tidy(my_fit)
+```
+```{r}
+lm_wflow
+lm_wflow %>% 
+  update_formula(Sale_Price ~ Longitude)
+```
+
+```{r}
+ames_rec
+```
+
+
+```{r}
+lm_wflow <- lm_wflow %>%
+  remove_formula() %>%
+  add_recipe(ames_rec)
+lm_wflow
+```
+```{r}
+my_fit <- fit(lm_wflow, ames_train)
+```
+
+```{r}
+predict(my_fit, ames_test, type = "pred_int")
+```
+
+
+
+```{r}
+lm_model <-
+  linear_reg() %>%
+  set_engine("lm") %>% 
+  set_mode("regression")
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>% 
+  add_formula(Sale_Price ~ Longitude + Latitude)
+```
+
