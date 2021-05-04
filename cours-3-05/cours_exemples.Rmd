@@ -266,9 +266,183 @@ lm_model <-
   linear_reg() %>%
   set_engine("lm") %>% 
   set_mode("regression")
-lm_wflow <-
+wflow <-
   workflow() %>%
   add_model(lm_model) %>% 
   add_formula(Sale_Price ~ Longitude + Latitude)
+```
+
+
+## Evaluation des performances
+
+```{r}
+ames <- Ames
+set.seed(123)
+ames_split <- initial_split(ames, prob = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+```
+
+```{r}
+lm_rec <-
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+           Latitude + Longitude, data = ames_train) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal()) %>%
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+```
+
+
+```{r}
+lm_model <-
+  linear_reg() %>%
+  set_engine("lm") %>% 
+  set_mode("regression")
+
+lm_wflow <- 
+  workflow() %>%
+  add_recipe(lm_rec) %>% 
+  add_model(lm_model)
+```
+
+```{r}
+rf_model <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+rf_wflow <-
+  workflow() %>%
+  add_formula(
+  Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+  Latitude + Longitude) %>%
+  add_model(rf_model)
+```
+
+
+
+```{r}
+ggplot(ames) +
+  aes(x = Gr_Liv_Area, y = Sale_Price) +
+  geom_point() +
+  theme_minimal() #+
+  #scale_x_log10() +
+  #scale_y_log10()
+```
+
+
+
+```{r}
+ames_resampling <- vfold_cv(ames_train, v = 10,)
+```
+
+```{r}
+ames_resampling %>% 
+  pluck("splits", 1) %>% 
+  analysis()
+
+ames_resampling %>% 
+  pluck("splits", 3) %>% 
+  assessment()
+```
+
+```{r}
+rf_results <- rf_wflow %>% 
+  fit_resamples(resamples = ames_resampling,
+                metrics = metric_set(rsq, mae))
+```
+
+```{r}
+lm_results <-  
+  lm_wflow %>% 
+  fit_resamples(resamples = ames_resampling,
+                metrics = metric_set(rsq, mae))
+lm_results
+```
+
+```{r}
+lm_results %>% 
+  pluck(".metrics", 1)
+```
+
+```{r}
+rf_results %>% 
+  pluck(".metrics", 1)
+```
+```{r}
+collect_metrics(rf_results)
+```
+
+```{r}
+collect_metrics(lm_results)
+```
+## Tuning
+
+```{r}
+ames_rec <-
+  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+  Latitude + Longitude, data = ames_train) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = tune()) %>%
+  step_dummy(all_nominal()) %>%
+  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>%
+  step_ns(Longitude, deg_free = tune("longitude df")) %>%
+  step_ns(Latitude, deg_free = tune("latitude df"))
+
+parameters(ames_rec)
+```
+
+
+```{r}
+
+rf_model <-
+  rand_forest(trees = tune(), 
+              mtry = tune(),
+              min_n = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+parameters(rf_model)
+```
+
+```{r}
+wflow <- workflow() %>%
+  add_recipe(ames_rec) %>%
+  add_model(rf_model)
+
+parameters(wflow)
+```
+
+```{r}
+mtry()
+```
+```{r}
+wflow %>% 
+  parameters() %>% 
+  pull_dials_object("longitude df")
+```
+```{r}
+flow_param <- wflow %>%
+  parameters() %>% 
+  update(mtry = mtry(c(1, 8)))
+
+flow_param %>% pull_dials_object("mtry")
+```
+
+```{r}
+rf_tune <- workflow() %>%
+  add_recipe(ames_rec) %>%
+  add_model(rf_model) %>%
+  tune_grid(
+    vfold_cv(ames_train),
+    grid = flow_param %>% grid_regular(levels = 2),
+    metrics = metric_set(rmse)
+  )
+```
+
+
+```{r}
+show_best(rf_results, metric = "rmse", n = 2)
 ```
 
